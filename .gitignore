@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 环境
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# 数据库
+*.db
+
+# Chroma 向量库
+chroma_db/
+
+# 上传文件
+docs/
+
+# HuggingFace模型缓存
+local_m3e_model/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# logs
+*.log

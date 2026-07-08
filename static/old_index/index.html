@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>RAG知识库助手</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <style>
+        body{
+            margin:0;
+            background:#f5f5f5;
+            font-family:Arial;
+        }
+
+        #app{
+            width:900px;
+            margin:30px auto;
+        }
+
+        h2{
+            text-align:center;
+        }
+
+        .chat{
+            background:white;
+            border-radius:10px;
+            height:600px;
+            overflow-y:auto;
+            padding:20px;
+            box-shadow:0 0 10px rgba(0,0,0,.1);
+        }
+
+        .msg{
+            margin:15px 0;
+        }
+
+        .user{
+            color:#1565c0;
+            font-weight:bold;
+        }
+
+        .assistant{
+            color:#2e7d32;
+            white-space:pre-wrap;
+        }
+
+        .bottom{
+            display:flex;
+            margin-top:20px;
+            gap:10px;
+        }
+
+        input{
+            flex:1;
+            padding:12px;
+            font-size:16px;
+        }
+
+        button{
+            width:120px;
+            font-size:16px;
+            cursor:pointer;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<div id="app">
+
+    <h2>RAG知识库助手</h2>
+
+    <div class="chat">
+
+        <div
+            v-for="item in messages"
+            class="msg"
+        >
+
+            <div
+                class="user"
+                v-if="item.role==='user'"
+            >
+                用户：
+                {{item.content}}
+            </div>
+
+            <div
+                class="assistant"
+                v-else
+            >
+                AI：
+                {{item.content}}
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="bottom">
+
+        <input
+            v-model="question"
+            @keyup.enter="sendMessage"
+            placeholder="请输入问题..."
+        >
+
+        <button
+            @click="sendMessage"
+        >
+            发送
+        </button>
+
+    </div>
+
+</div>
+
+<script>
+
+    const { createApp } = Vue
+    
+    createApp({
+    
+        data() {
+            return {
+                question: "",
+                messages: [],
+                sending: false
+            }
+        },
+    
+        methods: {
+    
+            scrollBottom() {
+                this.$nextTick(() => {
+                    const chat = document.querySelector(".chat")
+                    chat.scrollTop = chat.scrollHeight
+                })
+            },
+    
+            async sendMessage() {
+                if (this.sending) return
+                if (!this.question.trim()) return
+
+                const query = this.question.trim()
+
+                this.messages.push({ role: "user", content: query })
+                this.question = ""
+
+                const aiMessage = { role: "assistant", content: "" }
+                this.messages.push(aiMessage)
+                const aiIndex = this.messages.length - 1
+
+                this.scrollBottom()
+                this.sending = true
+
+                try {
+                    const response = await fetch("/api/stream", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ query })
+                    })
+
+                    if (!response.ok) {
+                        // ✅ Vue3 直接赋值
+                        this.messages[aiIndex].content = "请求失败：" + response.status
+                        return
+                    }
+
+                    const reader = response.body.getReader()
+                    const decoder = new TextDecoder("utf-8")
+                    let buffer = ""
+
+                    while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+
+                        buffer += decoder.decode(value, { stream: true })
+
+                        const lines = buffer.split("\n")
+                        buffer = lines.pop() || ""
+
+                        for (const line of lines) {
+                            const trimmed = line.trim()
+                            if (!trimmed || !trimmed.startsWith("data:")) continue
+
+                            const dataStr = trimmed.slice(5).trim()
+
+                            if (dataStr === "[DONE]") {
+                                this.sending = false
+                                return
+                            }
+
+                            try {
+                                const parsed = JSON.parse(dataStr)
+                                if (parsed.content) {
+                                    // ✅ Vue3 直接拼接赋值，自动触发响应式更新
+                                    this.messages[aiIndex].content += parsed.content
+                                    this.scrollBottom()
+                                }
+                            } catch (e) {
+                                console.error("SSE parse error:", e)
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // ✅ Vue3 直接赋值
+                    this.messages[aiIndex].content = "发生错误：" + e
+                } finally {
+                    this.sending = false
+                }
+            }
+    
+        }
+    
+    }).mount("#app")
+    
+    </script>
+
+</body>
+
+</html>

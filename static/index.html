@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>RAG知识库助手</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <style>
+        body { margin:0; background:#f0f2f5; font-family:Arial, sans-serif; font-size: 16px;}
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+        /* 会话列表项样式 */
+        .session-item { display: flex; justify-content: space-between; align-items: center; }
+        .session-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .delete-btn { 
+            cursor: pointer; opacity: 0; transition: 0.2s; color: #ff4d4f; 
+            font-size: 14px; padding: 0 5px; flex-shrink: 0;
+        }
+        .session-item:hover .delete-btn { opacity: 1; }
+
+        /* 知识库弹窗样式 */
+        .kb-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center; z-index: 999;
+            backdrop-filter: blur(2px);
+        }
+        .kb-panel {
+            background: #fff; padding: 25px; border-radius: 12px; width: 650px; max-height: 80vh; 
+            display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        .kb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .kb-close { cursor: pointer; font-size: 20px; color: #999; background: none; border: none; }
+        .kb-close:hover { color: #333; }
+        
+        .upload-area { margin-bottom: 20px; padding: 20px; border: 2px dashed #d9d9d9; border-radius: 8px; text-align: center; background: #fafafa; }
+        .upload-btn {
+            display: inline-block; padding: 10px 24px; background: #10a37f; color: #fff; 
+            border-radius: 6px; cursor: pointer; font-size: 14px; transition: background 0.2s;
+        }
+        .upload-btn:hover { background: #0e8c6c; }
+        .upload-btn.disabled { background: #ccc; cursor: not-allowed; }
+        
+        .doc-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .doc-table th { text-align: left; padding: 12px 10px; background: #f9f9f9; border-bottom: 1px solid #eee; color: #666; font-weight: 500; }
+        .doc-table td { padding: 14px 10px; border-bottom: 1px solid #f0f0f0; color: #333; }
+        .doc-table tr:hover td { background: #fafafa; }
+        .doc-del-btn { 
+            background: #fff1f0; color: #ff4d4f; border: 1px solid #ffccc7; 
+            padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s;
+        }
+        .doc-del-btn:hover { background: #ff4d4f; color: #fff; border-color: #ff4d4f; }
+
+        /* 知识库管理按钮的专属样式 */
+        .kb-btn {
+            background: #fff;
+            color: #666; /* 默认文字颜色 */
+            border: 1px solid #e5e5e5;
+            transition: all 0.2s ease; /* 丝滑的过渡动画 */
+        }
+
+        /* 鼠标悬浮时的状态 */
+        .kb-btn:hover {
+            background: #f0f0f0; /* 悬浮时背景变浅灰，而不是死板的黑色 */
+            color: #333;         /* 文字变深 */
+            border-color: #d0d0d0;
+        }
+
+        /* 新会话按钮：保持绿色 */
+    .session-btn {
+        background: #1fcda2 !important;
+        color: white !important;
+    }
+
+    /* 鼠标悬浮时：变成深绿色，且绝对不会卡死 */
+    .session-btn:hover {
+        background: #18b38b !important;
+        color: white !important;
+    }
+    </style>
+</head>
+
+<body>
+
+<div id="app" style="display: flex; height: 100vh; font-family: 'Microsoft YaHei', sans-serif; background: #f0f2f5; padding: 20px; box-sizing: border-box; gap: 20px;">
+    
+    <!-- 左侧：会话列表侧边栏 -->
+    <div style="width: 260px; background: #ffffff; color: #333333; border: 1px solid #eaeaea; padding: 15px; display: flex; flex-direction: column; box-shadow: 2px 0 10px rgba(0,0,0,0.05); border-radius: 12px; flex-shrink: 0;">
+        
+        <!-- 顶部：新建对话 -->
+        <button @click="createSession" class="session-btn" style="padding: 12px; margin-bottom: 15px; cursor: pointer; border: none; border-radius: 8px; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span style="font-size: 18px;">+</span> 新建对话
+        </button>
+        
+        <!-- 中部：会话列表 -->
+        <div style="flex: 1; overflow-y: auto; margin: 0 -5px; padding: 0 5px;">
+            <div class="session-item" 
+                 v-for="sess in sessions" :key="sess.id" 
+                 @click="loadSession(sess.id)" 
+                 :style="{
+                     padding: '12px', 
+                     marginBottom: '8px', 
+                     background: currentSessionId === sess.id ? '#f0f7ff' : 'transparent', 
+                     borderRadius: '8px', 
+                     cursor: 'pointer',
+                     transition: 'background 0.2s'
+                 }"
+                 onmouseover="if(this.style.background !== 'rgb(52, 53, 65)') this.style.background='#f0f7ff'" 
+                 onmouseout="if(this.style.background !== 'rgb(52, 53, 65)') this.style.background='transparent'">
+                <span class="session-text">💬 {{ sess.summary || '新对话' }}</span>
+                <span class="delete-btn" @click.stop="deleteSession(sess.id)" title="删除会话">🗑️</span>
+            </div>
+            
+            <div v-if="sessions.length === 0" style="text-align: center; color: #666; margin-top: 40px; font-size: 13px;">
+                暂无历史记录
+            </div>
+        </div>
+
+        <!-- 底部：知识库管理按钮 (长条形) -->
+        <button @click="toggleKnowledgeBase" class="kb-btn" style="padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">
+            <span style="font-size: 16px;">📚</span> 知识库管理
+        </button>
+    </div>
+
+    <!-- 右侧：聊天主界面 (增加圆角和阴影，不贴边) -->
+    <div style="flex: 1; display: flex; flex-direction: column; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden; max-width: 100%;">
+        
+        <!-- 顶部导航栏 -->
+        <div style="padding: 18px 24px; border-bottom: 1px solid #f0f0f0; font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; background: #fff;">
+            <span>RAG 知识库问答助手</span>
+            <span v-if="currentSessionId" style="font-size: 12px; color: #999; font-weight: normal;">Session: {{ currentSessionId }}</span>
+        </div>
+
+        <!-- 消息展示区 -->
+        <div style="flex: 1; overflow-y: auto; padding: 24px;">
+            
+            <!-- 欢迎语 -->
+            <div v-if="!currentSessionId || !currentSession || !currentSession.messages || currentSession.messages.length === 0" style="text-align: center; margin-top: 15vh; color: #888;">
+                <h2 style="font-size: 28px; margin-bottom: 12px; color: #333;">👋 欢迎使用</h2>
+                <p style="font-size: 15px;">请点击左侧的“新建对话” 然后开始提问。</p>
+            </div>
+
+            <!-- 消息列表 -->
+            <div style="flex: 1; overflow-y: auto; padding: 24px;">
+                
+                <!-- 【新增】内容居中且限制宽度的容器 -->
+                <div style="max-width: 800px; width: 100%; margin: 0 auto;">
+                    
+                    <!-- 每一行消息（去掉了外层的干扰，保留你原本优秀的左右对齐逻辑） -->
+                    <div v-for="(item, index) in messages" :key="index" style="margin-bottom: 24px; display: flex;" :style="{'justify-content': item.role === 'user' ? 'flex-end' : 'flex-start'}">
+                        
+                        <!-- 气泡本体 -->
+                        <div style="max-width: 75%; padding: 14px 18px; border-radius: 12px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; font-size: 16px;"
+                            :style="item.role === 'user' ? 'background: #e3f2fd; color: #000; border-bottom-right-radius: 2px;' : 'background: #f5f5f5; color: #000; border-bottom-left-radius: 2px;'">
+                            <strong style="display: block; font-size: 12px; color: #888; margin-bottom: 6px;">
+                                {{ item.role === 'user' ? '我' : 'AI 助手' }}
+                            </strong>
+                            {{ item.content }}
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            
+            <!-- 加载动画 -->
+            <div v-if="sending" style="margin-bottom: 24px; display: flex; justify-content: flex-start;">
+                <div style="background: #f5f5f5; padding: 14px 18px; border-radius: 12px; border-bottom-left-radius: 2px; display: inline-block; color: #666; font-size: 14px;">
+                    AI 正在思考中...
+                </div>
+            </div>
+        </div>
+        
+        <!-- 底部输入区 -->
+        <div style="padding: 20px 24px; border-top: 1px solid #f0f0f0; background: #fff; display: flex; justify-content: center;">
+            <!-- 新增一个内层 div 来限制宽度并排列输入框和按钮 -->
+            <div style="width: 100%; max-width: 800px; display: flex;">
+                <input v-model="query" 
+                    @keyup.enter="sendMessage" 
+                    :disabled="!currentSessionId || sending"
+                    :placeholder="currentSessionId ? (sending ? 'AI 正在生成...' : '请输入关于知识库的问题...') : '请先新建对话'" 
+                    style="flex: 1; padding: 12px 16px; border: 1px solid #e5e5e5; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s;"
+                    :style="sending ? 'background: #f9f9f9;' : ''"
+                    @focus="$event.target.style.borderColor='#10a37f'" 
+                    @blur="$event.target.style.borderColor='#e5e5e5'">
+                
+                <button @click="sendMessage" 
+                        :disabled="sending || !currentSessionId || !query.trim()" 
+                        style="margin-left: 12px; padding: 0 28px; cursor: pointer; background: #10a37f; color: white; border: none; border-radius: 8px; font-size: 14px; transition: background 0.2s;"
+                        :style="(sending || !currentSessionId || !query.trim()) ? 'background: #ccc; cursor: not-allowed;' : ''"
+                        onmouseover="if(!this.disabled) this.style.background='#0e8c6c'" 
+                        onmouseout="if(!this.disabled) this.style.background='#10a37f'">
+                    {{ sending ? '生成中...' : '发送' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 知识库管理弹窗 ================= -->
+    <div v-if="showKnowledgeBase" class="kb-overlay" @click.self="showKnowledgeBase = false">
+        <div class="kb-panel">
+            <div class="kb-header">
+                <h3 style="margin: 0; font-size: 18px; color: #333;">📚 知识库管理</h3>
+                <button class="kb-close" @click="showKnowledgeBase = false">✕</button>
+            </div>
+            <p style="margin: 0 0 20px 0; font-size: 13px; color: #888;">当前支持 <strong>.txt</strong> 和 <strong>.docx</strong> 格式。上传后自动向量化，删除时自动清理向量。</p>
+            
+            <!-- 上传区域 -->
+            <div class="upload-area">
+                <label :class="['upload-btn', { disabled: uploading }]">
+                    {{ uploading ? '⏳ 解析并向量化中...' : '📤 上传新文档' }}
+                    <input type="file" accept=".txt,.docx" @change="uploadFile" :disabled="uploading" style="display:none">
+                </label>
+            </div>
+
+            <!-- 文件列表 -->
+            <div style="flex: 1; overflow-y: auto; border: 1px solid #eee; border-radius: 8px;">
+                <table class="doc-table">
+                    <thead>
+                        <tr><th>文件名</th><th width="80">大小</th><th width="150">更新时间</th><th width="80" style="text-align: center;">操作</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr v-if="docList.length === 0">
+                            <td colspan="4" style="text-align:center; color:#999; padding: 40px;">暂无文档，请上传</td>
+                        </tr>
+                        <tr v-for="doc in docList" :key="doc.name">
+                            <td>📄 {{ doc.name }}</td>
+                            <td>{{ doc.size_kb }} KB</td>
+                            <td>{{ doc.updated_at }}</td>
+                            <td style="text-align: center;"><button class="doc-del-btn" @click="deleteDoc(doc.name)">删除</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            const query = ref('');
+            const messages = ref([]);      
+            const sessions = ref([]);      
+            const currentSessionId = ref(null); 
+            const sending = ref(false);
+            const chatContainer = ref(null); 
+
+            const showKnowledgeBase = ref(false);
+            const docList = ref([]);
+            const uploading = ref(false);
+
+            const loadSessions = async () => {
+                try {
+                    const res = await fetch('/api/sessions');
+                    sessions.value = await res.json();
+                    if (sessions.value.length > 0 && !currentSessionId.value) {
+                        loadSession(sessions.value[0].id);
+                    }
+                } catch (e) { console.error("加载会话列表失败", e); }
+            };
+
+            const createSession = async () => {
+                try {
+                    const res = await fetch('/api/sessions', { method: 'POST' });
+                    const data = await res.json();
+                    currentSessionId.value = data.session_id;
+                    messages.value = []; 
+                    await loadSessions(); 
+                } catch (e) { alert("新建对话失败"); }
+            };
+
+            const loadSession = async (sessionId) => {
+                currentSessionId.value = sessionId;
+                try {
+                    const res = await fetch(`/api/sessions/${sessionId}/messages`);
+                    if(res.ok) {
+                        messages.value = await res.json();
+                        scrollToBottom();
+                    }
+                } catch (e) { messages.value = []; }
+            };
+
+            const sendMessage = async () => {
+                if (!query.value.trim() || sending.value || !currentSessionId.value) return;
+                const userMsg = query.value;
+                messages.value.push({ role: 'user', content: userMsg });
+                query.value = '';
+                sending.value = true;
+                scrollToBottom();
+                messages.value.push({ role: 'assistant', content: '' });
+                const aiMsgIndex = messages.value.length - 1;
+
+                try {
+                    const response = await fetch('/api/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: userMsg, session_id: currentSessionId.value }) 
+                    });
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const text = decoder.decode(value);
+                        const lines = text.split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const data = line.substring(6);
+                                if (data === '[DONE]') continue;
+                                try {
+                                    const parsed = JSON.parse(data);
+                                    messages.value[aiMsgIndex].content += parsed.content;
+                                    scrollToBottom();
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                    loadSessions(); 
+                } catch (error) {
+                    messages.value[aiMsgIndex].content = "❌ 请求出错，请检查后端服务。";
+                } finally {
+                    sending.value = false;
+                }
+            };
+
+            const scrollToBottom = () => {
+                nextTick(() => {
+                    if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+                });
+            };
+
+            // 删除会话
+            const deleteSession = async (sessionId) => {
+                if (!confirm("确定要删除该会话及所有聊天记录吗？")) return;
+                try {
+                    await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+                    if (currentSessionId.value === sessionId) {
+                        currentSessionId.value = null;
+                        messages.value = [];
+                    }
+                    await loadSessions();
+                } catch (e) { alert("删除会话失败"); }
+            };
+
+            // 知识库管理
+            const toggleKnowledgeBase = async () => {
+                showKnowledgeBase.value = !showKnowledgeBase.value;
+                if (showKnowledgeBase.value) await loadDocs();
+            };
+
+            const loadDocs = async () => {
+                try {
+                    const res = await fetch('/api/docs');
+                    docList.value = await res.json();
+                } catch (e) { console.error("加载文档列表失败", e); }
+            };
+
+            const uploadFile = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                uploading.value = true;
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    const res = await fetch('/api/docs/upload', { method: 'POST', body: formData });
+                    if (!res.ok) {
+                        const errData = await res.json();
+                        throw new Error(errData.detail || '上传失败');
+                    }
+                    alert("上传并向量化成功！");
+                    await loadDocs(); 
+                } catch (e) {
+                    alert("上传失败: " + e.message);
+                } finally {
+                    uploading.value = false;
+                    event.target.value = ''; 
+                }
+            };
+
+            const deleteDoc = async (filename) => {
+                if (!confirm(`确定删除 ${filename}？知识库将不再包含该文件内容。`)) return;
+                try {
+                    const res = await fetch(`/api/docs/${filename}`, { method: 'DELETE' });
+                    if (!res.ok) throw new Error("删除失败");
+                    await loadDocs();
+                } catch (e) { alert("删除失败: " + e.message); }
+            };
+
+            loadSessions();
+
+            return {
+                query, messages, sessions, currentSessionId, sending, chatContainer,
+                loadSessions, createSession, loadSession, sendMessage,
+                showKnowledgeBase, docList, uploading,
+                deleteSession, toggleKnowledgeBase, loadDocs, uploadFile, deleteDoc
+            };
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
